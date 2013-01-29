@@ -26,7 +26,7 @@ typedef struct {
     float mod;
 } DATA;
 
-void parseCSV() {
+void parseCSV(DATA data[]) {
     float ig = -1, bg = -1, mod = -1;
     int timePos = 0, igPos = 0, bgPos = 0, modPos = 0;
     int count = 0;
@@ -35,8 +35,6 @@ void parseCSV() {
     char *pos = NULL;
     char *first = NULL;
     char time[MAX_STRING];
-
-    DATA data[MAX_LINES];
 
     f = fopen("G:\\E\\School\\FAV\\PPR\\semdata\\data\\A0904.csv", "r");
     printf("Opened\n");
@@ -49,9 +47,9 @@ void parseCSV() {
             first = line;
             pos = line;
             column = 0;
-           
+
             for (i = 0; i < strlen(line); i++) {
-            
+
                 if (line[i] != ';' && line[i] != '\n' && line[i] != ';\r\n') {
                     pos++;
                 } else {
@@ -77,7 +75,7 @@ void parseCSV() {
 
                     first = ++pos;
                     column++;
-                    printf("%s\n", tmp);
+                    /*printf("%s\n", tmp);*/
                 }
             }
             count++;
@@ -122,22 +120,24 @@ void parseCSV() {
                 data[count - 1].bg = bg;
                 data[count - 1].ig = ig;
                 data[count - 1].mod = mod;
-                printf("%s %f %f %f\n", data[count - 1].time, data[count - 1].bg,
-                        data[count - 1].ig, data[count - 1].mod);
+               /* printf("%s %f %f %f\n", data[count - 1].time, data[count - 1].bg,
+                        data[count - 1].ig, data[count - 1].mod);*/
                 count++;
             }
         }
 
     }
-    printf("Nacteno %i radku", count);
+    printf("Nacteno %i radku\n", count);
     fclose(f);
+    printf("File closed\n");
 }
 
 /*
  * 
  */
 int main(int argc, char** argv) {
-    parseCSV();
+    DATA data[MAX_LINES];
+    parseCSV(data);
     return (EXIT_SUCCESS);
 }
 
