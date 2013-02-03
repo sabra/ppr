@@ -7,7 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include "ApproxIface.h"
 
 #define BUFFER_SIZE 1024
 #define MAX_STRING 32
@@ -18,26 +18,31 @@
 #define MOD "Modifier"
 
 FILE *f;
+LPAPPROXPOINT data;
 
-typedef struct {
-    char time[9];
-    float bg;
-    float ig;
-    float mod;
-} DATA;
+void parseCSV() {
 
-void parseCSV(DATA data[]) {
-    float ig = -1, bg = -1, mod = -1;
+    char time[MAX_STRING];
+    float ig = 0, bg = 0, mod = 0;
     int timePos = 0, igPos = 0, bgPos = 0, modPos = 0;
     int count = 0;
     int column = 0;
     int length = 0;
     char *pos = NULL;
     char *first = NULL;
-    char time[MAX_STRING];
 
-    f = fopen("G:\\E\\School\\FAV\\PPR\\semdata\\data\\A0904.csv", "r");
-    printf("Opened\n");
+    data = (LPAPPROXPOINT) malloc(sizeof (APPROXPOINT) * MAX_LINES);
+    if (data == NULL) {
+        printf("Memory could not be allocated!\n");
+        exit(1);
+    }
+
+    if ((f = fopen("A0904.csv", "r")) == NULL) {
+        printf("File could not be opened!\n");
+        exit(1);
+    } else {
+        printf("Opened\n");
+    }
 
     char line[1024];
     char tmp[500];
@@ -120,8 +125,8 @@ void parseCSV(DATA data[]) {
                 data[count - 1].bg = bg;
                 data[count - 1].ig = ig;
                 data[count - 1].mod = mod;
-               /* printf("%s %f %f %f\n", data[count - 1].time, data[count - 1].bg,
-                        data[count - 1].ig, data[count - 1].mod);*/
+                /*printf("%s %f %f %f\n", data[count - 1].time, data[count - 1].bg,
+                         data[count - 1].ig, data[count - 1].mod);*/
                 count++;
             }
         }
@@ -136,8 +141,7 @@ void parseCSV(DATA data[]) {
  * 
  */
 int main(int argc, char** argv) {
-    DATA data[MAX_LINES];
-    parseCSV(data);
+    parseCSV();
     return (EXIT_SUCCESS);
 }
 
