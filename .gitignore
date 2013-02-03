@@ -167,5 +167,6 @@ pip-log.txt
 #############
 *.csv
 *.stackdump
+*.inc
 .gitignore
 nbproject/
