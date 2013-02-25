@@ -170,3 +170,4 @@ pip-log.txt
 *.inc
 .gitignore
 nbproject/
+nbproject
