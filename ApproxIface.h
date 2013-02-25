@@ -18,13 +18,12 @@ typedef struct _APPROXPOINT {
 } APPROXPOINT, *LPAPPROXPOINT;
 
 extern LPAPPROXPOINT data;
-extern int size_data;
 extern const floattype OneMinute;
 extern const floattype OneSecond;
-extern int max_i;
-extern int min_i;
-extern int max_b;
-extern int min_b;
+extern int maxI;
+extern int minI;
+extern int maxB;
+extern int minB;
 
 extern HRESULT GetBuf(LPAPPROXPOINT points, floattype step, int len, int *filled);
 
