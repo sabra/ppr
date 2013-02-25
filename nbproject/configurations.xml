@@ -5,6 +5,9 @@
                    displayName="Header Files"
                    projectFiles="true">
       <itemPath>ApproxIface.h</itemPath>
+      <itemPath>Evolution.h</itemPath>
+      <itemPath>Graph.h</itemPath>
+      <itemPath>main.h</itemPath>
     </logicalFolder>
     <logicalFolder name="ResourceFiles"
                    displayName="Resource Files"
@@ -14,6 +17,7 @@
                    displayName="Source Files"
                    projectFiles="true">
       <itemPath>Evolution.c</itemPath>
+      <itemPath>Graph.c</itemPath>
       <itemPath>main.c</itemPath>
     </logicalFolder>
     <logicalFolder name="TestFiles"
@@ -27,7 +31,6 @@
                    kind="IMPORTANT_FILES_FOLDER">
       <itemPath>Makefile</itemPath>
     </logicalFolder>
-    <itemPath>IFastDataApprox.h</itemPath>
   </logicalFolder>
   <projectmakefile>Makefile</projectmakefile>
   <confs>
