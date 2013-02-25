@@ -43,7 +43,7 @@ void parseCSV() {
         exit(1);
     }
 
-    if ((f = fopen("I0904.csv", "r")) == NULL) {
+    if ((f = fopen("A0904.csv", "r")) == NULL) {
         printf("File could not be opened!\n");
         exit(1);
     }

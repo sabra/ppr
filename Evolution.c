@@ -9,9 +9,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
-//#include <windef.h>
-//#include <rpcndr.h>
-//#include <winioctl.h>
+#include <pthread.h>
 #include "ApproxIface.h"
 #include "Evolution.h"
 #include "main.h"
@@ -19,48 +17,65 @@
 
 int length;
 int filled;
-int *p_filled;
+int *pFilled;
 floattype step;
 static LPAPPROXPOINT points;
 
-static double F; //mutační konstanta
-static double CR; //práh křížení
-static int NP; //počet jedinců v populaci
-static int D = 6; //počet dimenzí (rozměr jedince - argumenty funkce)
+static double F;
+static double CR;
+static int NP;
+static int D = 8;
+
 static PINDIVIDUAL population;
 static PINDIVIDUAL mutatedPopulation;
+static pthread_mutex_t barrierLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t condBarrier = PTHREAD_COND_INITIALIZER;
 
 const floattype OneMinute = 1.0 / (24.0 * 60.0);
 const floattype OneSecond = 1.0 / (24.0 * 60.0 * 60.0);
-const int dtMax = 40 * 60;
 static double fiveMinNeg;
 static double fiveMinPos;
-static double fortyMinPos;
 static int maxDt = 2400;
-int minIndex = -1;
-double minValue = 1000;
-int maxIndex = -1;
-double maxValue = 0;
+int vofMinIndex = -1;
+double vofMin = 1000;
+int vofMaxIndex = -1;
+double vofMax = 0;
+static int generations = 10000;
 
 
-static void evolve();
-static void generateIndividuals();
-static void generateIndividual();
-static void mutatePopulation();
+static int barrierReadCounter = 0; // číslo jedince, který bude vláknem počítán
+static int barrierWriteCounter = 0; // počet zpracovaných - vlákno které dosáhne max. počtu probudí ostatní, maximum určuje NP - počet jedinců v populaci 
+static int end = 0; // slouží k ukončení výpočtu
+static double sum = 0; // průběžný výpočet průměrného absolutního rozdílu
+static double sumFinal = 0; // celkový průměrný absolutní rozdíl
+
 static int penalization(INDIVIDUAL vector);
+static void generateIndividual();
+static void *threaded();
+static void mutatePopulation();
 static double probability();
 
-static void evolve() {
-    generateIndividuals();
-    mutatePopulation();
-}
+static int penalization(INDIVIDUAL vector) {
+    int penalty = 0;
+    double kDtEcg = vector.k * vector.dt * vector.ecg;
 
-static void generateIndividuals() {
-    srand(time(NULL));
-    int i;
-    for (i = 0; i < NP; i++) {
-        generateIndividual(i);
+    if (vector.c <= 0) {
+        penalty += 1000;
     }
+    if (vector.cg >= 0) {
+        penalty += 1000;
+    }
+    if (vector.dt < 0 || vector.dt > maxDt * OneSecond) {
+        penalty += 1000;
+    }
+    if (vector.p < 0 || vector.p > 1) {
+        penalty += 1000;
+    }
+    if (fiveMinNeg > kDtEcg || kDtEcg > fiveMinPos) {
+        penalty += 1000;
+    }
+
+    return penalty;
 }
 
 static void generateIndividual(int i) {
@@ -101,10 +116,10 @@ static void generateIndividual(int i) {
     } while (indexI < 0 || indexI > filled);
 
     double bt = points[t].bg;
-    double leftSide = p * bt + cg * bt * ecg + c;
-    double rightSide = points[indexI].ig;
+    double left = p * bt + cg * bt * ecg + c;
+    double right = points[indexI].ig;
 
-    double vof = fabs(rightSide - leftSide); // hodnota ucelove funkce (value of objective function)
+    double vof = fabs(right - left); // hodnota ucelove funkce (value of objective function)
 
     population[i].t = t;
     population[i].c = c;
@@ -117,106 +132,148 @@ static void generateIndividual(int i) {
 
 }
 
-static void mutatePopulation() {
-    int i;
-    int a, b, c;
-    for (i = 0; i < NP; i++) {
-        do {
-            a = rand() % NP;
-        } while (a == i);
-        do {
-            b = rand() % NP;
-        } while (b == i || b == a);
-        do {
-            c = rand() % NP;
-        } while (c == i || c == b || c == a);
+static void *threaded() {
+    while (1) {
+        pthread_mutex_lock(&barrierLock);
+        while (barrierReadCounter == NP) {
+            pthread_cond_wait(&condBarrier, &barrierLock); // uspi se a pri probuzeni se opet testuje podminka
+            if (generations == 0) { // po dosažení počtu generací ukonči vlákno
+                pthread_mutex_unlock(&barrierLock);
+                return NULL;
+            }
+        }
+        if (end) { // po dosažení počtu generací ukonči vlákno
+            pthread_mutex_unlock(&barrierLock);
+            return NULL;
+        }
+        int i = barrierReadCounter;
+        barrierReadCounter++; // počet přečtených jedinců
+        pthread_mutex_unlock(&barrierLock);
 
-        INDIVIDUAL noiseVector;
-        noiseVector.c = (population[a].c - population[b].c) * F + population[c].c;
-        noiseVector.cg = (population[a].cg - population[b].cg) * F + population[c].cg;
-        noiseVector.dt = (population[a].dt - population[b].dt) * F + population[c].dt;
-        noiseVector.ecg = (population[a].ecg - population[b].ecg) * F + population[c].ecg;
-        noiseVector.k = (population[a].k - population[b].k) * F + population[c].k;
-        noiseVector.p = (population[a].p - population[b].p) * F + population[c].p;
-        noiseVector.vof = (population[a].vof - population[b].vof) * F + population[c].vof;
-        noiseVector.t = (population[a].t - population[b].t) * F + population[c].t;
+        mutatePopulation(i);
 
-        //int penale = penalization(noiseVector);
-        //double prob = probability();
-        if (probability() > CR) {
-            noiseVector.c = population[i].c;
-        }
-        if (probability() > CR) {
-            noiseVector.cg = population[i].cg;
-        }
-        if (probability() > CR) {
-            noiseVector.dt = population[i].dt;
-        }
-        if (probability() > CR) {
-            noiseVector.ecg = population[i].ecg;
-        }
-        if (probability() > CR) {
-            noiseVector.k = population[i].k;
-        }
-        if (probability() > CR) {
-            noiseVector.t = population[i].t;
-        }
-        if (probability() > CR) {
-            noiseVector.vof = population[i].vof;
-        }
+        pthread_mutex_lock(&barrierLock);
+        barrierWriteCounter++; //počet prošlých jedinců
+        if (barrierWriteCounter == NP) {
 
-        double kDtEcq = noiseVector.k * noiseVector.dt * noiseVector.ecg;
-        int time = (int) ((noiseVector.dt + kDtEcq) / OneSecond);
-        int indexI = population[i].t + time;
+            sumFinal += (sum / NP);
+            generations--;
+            population = mutatedPopulation; //nahrazení populace po skončení generace
 
-        if (indexI < 0 || indexI >= filled || noiseVector.t < 0 || noiseVector.t >= filled) {
-            mutatedPopulation[i].t = population[i].t;
-            mutatedPopulation[i].c = population[i].c;
-            mutatedPopulation[i].cg = population[i].cg;
-            mutatedPopulation[i].dt = population[i].dt;
-            mutatedPopulation[i].ecg = population[i].ecg;
-            mutatedPopulation[i].k = population[i].k;
-            mutatedPopulation[i].p = population[i].p;
-            mutatedPopulation[i].vof = population[i].vof;
-            continue;
+            barrierReadCounter = 0;
+            barrierWriteCounter = 0;
+
+            if (generations == 0) {
+                end = 1;
+            }
+            pthread_cond_broadcast(&condBarrier);
         }
+        pthread_mutex_unlock(&barrierLock);
+        if (end) {
+            return (NULL);
+        }
+    }
+}
 
+static void mutatePopulation(int i) {
+    int a = 0, b = 0, c = 0;
+    double vof = 0.0;
+
+    do {
+        a = rand() % NP;
+    } while (a == i);
+    do {
+        b = rand() % NP;
+    } while (b == i || b == a);
+    do {
+        c = rand() % NP;
+    } while (c == i || c == b || c == a);
+
+    INDIVIDUAL noiseVector;
+    noiseVector.c = (population[a].c - population[b].c) * F + population[c].c;
+    noiseVector.cg = (population[a].cg - population[b].cg) * F + population[c].cg;
+    noiseVector.dt = (population[a].dt - population[b].dt) * F + population[c].dt;
+    noiseVector.ecg = (population[a].ecg - population[b].ecg) * F + population[c].ecg;
+    noiseVector.k = (population[a].k - population[b].k) * F + population[c].k;
+    noiseVector.p = (population[a].p - population[b].p) * F + population[c].p;
+    noiseVector.vof = (population[a].vof - population[b].vof) * F + population[c].vof;
+    noiseVector.t = (population[a].t - population[b].t) * F + population[c].t;
+
+    int penale = penalization(noiseVector);
+    
+    if (probability() > CR) {
+        noiseVector.c = population[i].c;
+    }
+    if (probability() > CR) {
+        noiseVector.cg = population[i].cg;
+    }
+    if (probability() > CR) {
+        noiseVector.dt = population[i].dt;
+    }
+    if (probability() > CR) {
+        noiseVector.ecg = population[i].ecg;
+    }
+    if (probability() > CR) {
+        noiseVector.k = population[i].k;
+    }
+    if (probability() > CR) {
+        noiseVector.t = population[i].t;
+    }
+    if (probability() > CR) {
+        noiseVector.vof = population[i].vof;
+    }
+
+    double kDtEcq = noiseVector.k * noiseVector.dt * noiseVector.ecg;
+    int time = (int) ((noiseVector.dt + kDtEcq) / OneSecond);
+    int indexI = population[i].t + time;
+
+    if (indexI < 0 || indexI >= filled || noiseVector.t < 0 || noiseVector.t >= filled) {
+        /*mutatedPopulation[i].t = population[i].t;
+        mutatedPopulation[i].c = population[i].c;
+        mutatedPopulation[i].cg = population[i].cg;
+        mutatedPopulation[i].dt = population[i].dt;
+        mutatedPopulation[i].ecg = population[i].ecg;
+        mutatedPopulation[i].k = population[i].k;
+        mutatedPopulation[i].p = population[i].p;
+        mutatedPopulation[i].vof = population[i].vof;*/
+        penale = 100000000;
+    } else {
         double bt = points[noiseVector.t].bg;
-        double leftSide = noiseVector.p * bt + noiseVector.cg * bt * noiseVector.ecg + noiseVector.c;
-        double rightSide = points[indexI].ig;
+        double left = noiseVector.p * bt + noiseVector.cg * bt * noiseVector.ecg + noiseVector.c;
+        double right = points[indexI].ig;
 
-        double vof = fabs(rightSide - leftSide); // hodnota ucelove funkce (value of objective function)
+        double vof = fabs(right - left); // hodnota ucelove funkce (value of objective function)
 
-        if (vof < minValue) {
-            minValue = vof;
-            minIndex = i;
+        if (vof > vofMax) {
+            vofMax = vof;
+            vofMaxIndex = i;
         }
-        if(vof > maxValue){
-            maxValue = vof;
-            maxIndex = i;
-        }
-        
-        if (population[i].vof > vof) {
-            //printf("%d huf %f\n", i,  huf );
-            mutatedPopulation[i].t = noiseVector.t;
-            mutatedPopulation[i].c = noiseVector.c;
-            mutatedPopulation[i].cg = noiseVector.cg;
-            mutatedPopulation[i].dt = noiseVector.dt;
-            mutatedPopulation[i].ecg = noiseVector.ecg;
-            mutatedPopulation[i].k = noiseVector.k;
-            mutatedPopulation[i].p = noiseVector.p;
-            mutatedPopulation[i].vof = vof;
-        } else {
-            mutatedPopulation[i].t = population[i].t;
-            mutatedPopulation[i].c = population[i].c;
-            mutatedPopulation[i].cg = population[i].cg;
-            mutatedPopulation[i].dt = population[i].dt;
-            mutatedPopulation[i].ecg = population[i].ecg;
-            mutatedPopulation[i].k = population[i].k;
-            mutatedPopulation[i].p = population[i].p;
-            mutatedPopulation[i].vof = population[i].vof;
-        }
-
+        vof += penale;
+    }
+   
+    if (vof < vofMin) {
+        vofMin = vof;
+        vofMinIndex = i;
+    }
+    
+    if (population[i].vof > vof) {
+        mutatedPopulation[i].t = noiseVector.t;
+        mutatedPopulation[i].c = noiseVector.c;
+        mutatedPopulation[i].cg = noiseVector.cg;
+        mutatedPopulation[i].dt = noiseVector.dt;
+        mutatedPopulation[i].ecg = noiseVector.ecg;
+        mutatedPopulation[i].k = noiseVector.k;
+        mutatedPopulation[i].p = noiseVector.p;
+        mutatedPopulation[i].vof = vof;
+    } else {
+        mutatedPopulation[i].t = population[i].t;
+        mutatedPopulation[i].c = population[i].c;
+        mutatedPopulation[i].cg = population[i].cg;
+        mutatedPopulation[i].dt = population[i].dt;
+        mutatedPopulation[i].ecg = population[i].ecg;
+        mutatedPopulation[i].k = population[i].k;
+        mutatedPopulation[i].p = population[i].p;
+        mutatedPopulation[i].vof = population[i].vof;
     }
 }
 
@@ -225,34 +282,15 @@ static double probability() {
     return prob;
 }
 
-static int penalization(INDIVIDUAL vector) {
-    int penalty = 0;
-    double kDtEcg = vector.k * vector.dt * vector.ecg;
-
-    if (vector.c <= 0) {
-        penalty += 1000;
-    }
-    if (vector.cg >= 0) {
-        penalty += 1000;
-    }
-    if (vector.dt < 0 || vector.dt > maxDt * OneSecond) {
-        penalty += 1000;
-    }
-    if (vector.p < 0 || vector.p > 1) {
-        penalty += 1000;
-    }
-    if (fiveMinNeg > kDtEcg || kDtEcg > fiveMinPos) {
-        penalty += 1000;
-    }
-
-    return penalty;
-}
-
 void evolution() {
+    srand(time(NULL));
+    int processes = 1;
     length = count;
     filled;
-    p_filled = &filled;
+    pFilled = &filled;
     step = 1;
+    int i, rc;
+    pthread_t threads[processes];
 
     D = 8;
     NP = D * 100;
@@ -261,7 +299,7 @@ void evolution() {
 
     fiveMinNeg = OneMinute * -5.0;
     fiveMinPos = OneMinute * 5.0;
-    fortyMinPos = OneMinute * 40;
+
     population = (PINDIVIDUAL) malloc(sizeof (INDIVIDUAL) * NP);
     mutatedPopulation = (PINDIVIDUAL) malloc(sizeof (INDIVIDUAL) * NP);
 
@@ -271,10 +309,25 @@ void evolution() {
         exit(1);
     }
 
-    GetBuf(points, step, length, p_filled);
+    GetBuf(points, step, length, pFilled);
 
-    evolve();
-    writeGraph(points, population[minIndex].p, population[minIndex].cg,
-            population[minIndex].ecg, population[minIndex].c, population[minIndex].dt,
-            population[minIndex].k);
+    for (i = 0; i < NP; i++) {
+        generateIndividual(i);
+    }
+
+    for (i = 0; i < processes; ++i) {
+        if (rc = pthread_create(&threads[i], NULL, threaded, NULL)) {
+            fprintf(stderr, "error: pthread_create, rc: %d\n", rc);
+        }
+    }
+
+    for (i = 0; i < processes; ++i) {
+        if (rc = pthread_join(threads[i], NULL)) {
+            fprintf(stderr, "error: pthread_join, rc: %d\n", rc);
+        }
+    }
+
+    writeGraph(points, population[vofMinIndex].p, population[vofMinIndex].cg,
+            population[vofMinIndex].ecg, population[vofMinIndex].c, population[vofMinIndex].dt,
+            population[vofMinIndex].k);
 }

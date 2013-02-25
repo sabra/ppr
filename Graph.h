@@ -1,8 +1,8 @@
 /* 
  * File:   Graph.h
- * Author: Jarda
+ * Author: Sabra
  *
- * Created on 14. leden 2013, 21:09
+ * Created on 15. únor 2013, 13:15
  */
 
 #ifndef GRAPH_H
